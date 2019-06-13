@@ -4,7 +4,7 @@
 
     "parameters": {
         "ResourceLocation": {"value": "{{ ResourceLocation }}"},
-        "OwnerSigninName": {"value": "{{ OwnerNetId }}"},
+        "OwnerSigninName": {"value": "{{ OwnerSigninName }}"},
         "ChargingAccount": { "value": "{{ ChargingAccount }}" },
         "ApplicationName": { "value": "{{ ApplicationName }}" },
         "ApplicationBusinessUnit": {"value": "{{ ApplicationBusinessUnit }}"},
