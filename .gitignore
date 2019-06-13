@@ -1,0 +1,6 @@
+.DS_Store
+
+psmodules/
+scratch/
+
+sample_data/*.json
