@@ -1,6 +1,6 @@
 $SUBSCRIPTION_NAME = (Get-AzContext).Subscription.Name
 
-function DataSensitivity {
+function AzDataSensitivity {
     param(
         [Parameter(Mandatory=$True)]
         [AllowNull()]
@@ -15,7 +15,7 @@ function DataSensitivity {
     }
 }
 
-function VmName {
+function AzVmName {
     param(
         [Parameter(Mandatory=$True)]
         [AllowNull()]
@@ -35,7 +35,7 @@ function VmName {
     }
 }
 
-function VnetName {
+function AzVnetName {
     param(
         [Parameter(Mandatory=$True)]
         [AllowNull()]
@@ -72,9 +72,9 @@ function AzPrivateIps {
             [PSCustomObject] @{
                 Address = $_.PrivateIpAddress
                 Properties = [PSCustomObject] @{
-                    DataSensitivity = DataSensitivity -Tags $tags
-                    AttachedVmName = VmName -Vm $attachedVm
-                    AttachedToVnet = VnetName -Subnet $attachedSubnet
+                    DataSensitivity = AzDataSensitivity -Tags $tags
+                    AttachedVmName = AzVmName -Vm $attachedVm
+                    AttachedToVnet = AzVnetName -Subnet $attachedSubnet
                 }
             }
         )
