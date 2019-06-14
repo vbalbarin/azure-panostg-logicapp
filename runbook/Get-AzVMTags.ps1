@@ -1,87 +1,15 @@
-[CmdletBinding()]
-
-param(
-    [Parameter(Mandatory=$True,HelpMessage='Azure resource group containing virtual machine.')]
-    [string] $ResourceGroupName,
-
-    [Parameter(Mandatory=$True,HelpMessage='The Azure virtual machine name.')]
-    [string] $VirtualMachineName
-)
-
-function Get-ConnectionAzProfile
-{
-     # Connect to Azure AD and obtain an authorized context to access directory information regarding owner    
-    [Cmdletbinding()]
-
-    param(
-        
-        [Parameter(Mandatory=$False, HelpMessage='Azure connection name.')]
-        [string] $ConnectionName = 'AzureRunAsConnection'
-    
-    )
-
-    $OUTPUT = @{
-        Result = "NotExecuted"
-        Value = "None"
-    }
-    
-    try
-    {
-        $servicePrincipalConnection = Get-AutomationConnection -Name $ConnectionName
-        $azProfile = Add-AzAccount -ServicePrincipal `
-                                   -TenantId $servicePrincipalConnection.TenantId `
-                                   -ApplicationId $servicePrincipalConnection.ApplicationId `
-                                   -CertificateThumbprint $servicePrincipalConnection.CertificateThumbprint 3>&1 2>&1 > $null
-        $OUTPUT = [PSCustomObject] @{
-            Result = "Success"
-            Value = $azProfile
-        }
-    }
-    catch
-    {
-        if (!$servicePrincipalConnection)
-        {
-            try
-            {
-                $azContext = Get-AzContext
-                $OUTPUT = [PSCustomObject] @{
-                    Result = "Success"
-                    Value = $azContext
-                }
-            }
-            catch 
-            {
-                $OUTPUT = [PSCustomObject] @{
-                    Result = "Failure"
-                    Value = "No service principal connection; cannot obtain Azure context."
-                }
-            }
-        }
-        else
-        {
-            $OUTPUT = [PSCustomObject] @{
-                Result = "Failure"
-                Value = $_.Exception
-            }
-        }
-    }
-    finally
-    {
-        Write-Output $OUTPUT
-    }
-}  
+$SUBSCRIPTION_NAME = (Get-AzContext).Subscription.Name
 
 function DataSensitivity {
-    
     param(
         [Parameter(Mandatory=$True)]
+        [AllowNull()]
         [HashTable] $Tags
     )
 
-    $tagsObject = [PSCustomObject] $Tags
-
-    if ($tagsObject.DataSensitivity) {
-        [String] ($tagsObject.DataSensitivity)
+    if (($Tags) -and !($Tags -eq {})) {
+        $ds = $Tags.DataSensitivity
+        if ($ds) {[String] $ds} else {[String] 'None'}
     } else {
         [String] 'None'
     }
@@ -90,25 +18,40 @@ function DataSensitivity {
 function VmName {
     param(
         [Parameter(Mandatory=$True)]
-        [String] $VmId
+        [AllowNull()]
+        [Object] $Vm
     )
-
-    if ($VmId.ToString() -eq [String]::Empty) {
+    
+    if ($Vm) {
+        # TODO: Perhaps throw execption if `$<Parameter>` does not have `<member>`. 
+        $vmId = $Vm.Id
+        if (($vmId) -and !($vmId -eq [String]::Empty)) {   
+            [String] $($vmId.Split('/')[-1])
+        } else {
+            [String] 'None'
+        }
+    } else {
         [String] 'None'
-    } elseif ($VmId){
-        [String] $($VmId.Split('/')[-1])
     }
 }
+
 function VnetName {
     param(
         [Parameter(Mandatory=$True)]
-        [String] $SubnetId
+        [AllowNull()]
+        [Object] $Subnet
     )
 
-    if ($SubnetId.ToString() -eq [String]::Empty) {
-        [String ]'None'
-    } elseif ($SubnetId) {
-        [String] $($SubnetId.Split('/')[8])
+    if ($Subnet) {
+        # TODO: Perhaps throw execption if `$<Parameter>` does not have `<member>`. 
+        $subnetId = $Subnet.Id
+        if (($subnetId) -and !($subnetId -eq [String]::Empty)) {   
+            [String] $($SubnetId.Split('/')[8])
+        } else {
+            [String] 'None'
+        }
+    } else {
+        [String] 'None'
     }
 }
 
@@ -120,37 +63,18 @@ function AzPrivateIps {
     $azNic = $AzNetworkInterface
     $azPrivateIps = New-Object System.Collections.Generic.List[System.Object]
 
-    #region: Checks for null; return some valid type.
-    # Source of nasty errors-->Azure Commandlets will return [type]::empty or null
-    $tags = if (($null -eq $nic.Tag) -or ($nic.Tag -eq {})) {
-                @{ DataSensitivity = 'None' }
-            } else {
-                $nic.Tag
-            }
-    $attachedVm = if ($null -eq $azNic.VirtualMachine) {
-                    [PSCustomObject]@{ Id = '/none' }
-                  } else {
-                    $azNic.VirtualMachine
-                  }
-    #endregion: Checks for null; return some valid type.
-
+    $tags = $azNic.Tag
+    $attachedVm = $azNic.VirtualMachine
+ 
     $azNic.IpConfigurations | ForEach-Object {
-        $attachedSubnet = if ($null -eq $_.Subnet) {
-                              [PSCustomObject]@{
-                                  Id = '/subscriptions/none/resourceGroups/none' + `
-                                       '/providers/Microsoft.Network/virtualNetworks/none' + `
-                                       '/subnets/none'
-                               }
-                          } else {
-                              $_.Subnet
-                          }
+        $attachedSubnet = $_.Subnet
         $azPrivateIps.Add(
             [PSCustomObject] @{
                 Address = $_.PrivateIpAddress
                 Properties = [PSCustomObject] @{
                     DataSensitivity = DataSensitivity -Tags $tags
-                    AttachedVmName = VmName -VmId $attachedVm.Id
-                    AttachedToVnet = VnetName -SubnetId $attachedSubnet.Id
+                    AttachedVmName = VmName -Vm $attachedVm
+                    AttachedToVnet = VnetName -Subnet $attachedSubnet
                 }
             }
         )
@@ -207,28 +131,3 @@ function Get-AzPrivateIps {
 
     Write-Output [PScustomObject] $output
 }
-
-<#
-Get-AzNICTags
-{
-    [CmdletBinding()]
-
-    param(
-        [Parameter(Mandatory=$True,HelpMessage='Azure resource group containing virtual machine.')]
-        [string] $ResourceGroupName,
-
-        [Parameter(Mandatory=$True,HelpMessage='The Azure virtual machine name.')]
-        [string] $VirtualMachineName
-    )
-
-    $OUTPUT = @{
-        Result = "NotExecuted"
-        Value = "None"
-    }
-
-    Write-Output $OUTPUT
-}
-#>
-
-Write-Output $(Get-ConnectionAzProfile | ConvertTo-Json)
-
