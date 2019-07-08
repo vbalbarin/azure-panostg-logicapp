@@ -6,6 +6,8 @@ While Palo Alto Network firewall PANOS 8.+ supports a connection to Azure that e
 
 ## Description of Solution
 
+![PANOsTgSolution](assets/under_construction.svg)
+
 ## Implementation of Solution
 
 ### Creation of runbook
