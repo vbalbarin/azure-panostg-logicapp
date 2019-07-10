@@ -65,7 +65,19 @@ Once the account has been created, it must be assigned the proper role over the 
 
 ```powershell
 # Get AppId of the automation account.
-$AZURE_AUTOMATION_ACCOUNT_APPID = $(Get-AzADApplication -DisplayNameStartWith $('{0}_' -f $AZURE_AUTOMATION_ACCOUNT_NAME)).ApplicationId.Guid
+$AZURE_AUTOMATION_ACCOUNT_SP = Get-AzADApplication -DisplayNameStartWith $('{0}_' -f $AZURE_AUTOMATION_ACCOUNT_NAME)
+
+$AZURE_AUTOMATION_ACCOUNT_SP_APPID = $AZURE_AUTOMATION_ACCOUNT.ApplicationId.Guid
+
+New-AzRoleAssignment -ApplicationId $AZURE_AUTOMATION_ACCOUNT_SP_APPID `
+                     -RoleDefinitionName 'Reader' `
+                     -Scope $('/subscriptions/{0}' -f $AZURE_SUBSCRIPTION_ID)
+
+Remove-AzRoleAssignment -ServicePrincipalName $AZURE_AUTOMATION_ACCOUNT_SP_APPID `
+                        -RoleDefinitionName 'Contributor' `
+                        -Scope $('/subscriptions/{0}' -f $AZURE_SUBSCRIPTION_ID)
+
+
 ```
 ### Creation of logic App
 
@@ -98,7 +110,14 @@ New-AzRoleAssignment -ApplicationId $AZURE_LOGICAPP_API_SP.ApplicationId.Guid `
 
 ```
 
-[You may proceed to logic app portal to create a new logic app]
+Add a new blank Logic App Resource under the `$AZURE_RESOURCE_GROUP` resource group that has been created.
+
+In the Logic App editor, add a new Event grid trigger. Switch from the default user connection to a service principal connection. Furnish the following values:
+
+* **Connection Name**: panostg-eventgrid-connection
+* **Client Id**: {{ `$AZURE_LOGICAPP_API_SP.ApplicationId.Guid` }}
+* **Client Secret**: {{ `$AZURE_LOGICAPP_API_SP_PASSWORD` }}
+* **Tenant**: {{ `$(Get-AzContext).Tenant.Id` }}
 
 ```powershell
 # Assign the appropriate roles to allow the service principal to create jobs from the New-ResourceGroup runbook.
