@@ -28,22 +28,22 @@
     A RunAs account in the Automation account is required for this runbook.
 
 .PARAMETER WebhookData
-    Mandatory. The information about the write event that is sent to this runbook from Azure Event grid.
+    Optional. The information about the write event that is sent to this runbook from Azure Event grid.
   
 .PARAMETER ChannelURL
-    Optinal. The Microsoft Teams Channel webhook URL that information will get sent.
+    Optional. The Microsoft Teams Channel webhook URL that information will get sent.
 
 .NOTES
     AUTHOR: Vincent Balbarin
     COPYRIGHT: Yale University 2019
-    LASTEDIT: 2019-07-18
+    LASTEDIT: 2019-07-25
 #>
  
 param(
-    [parameter (Mandatory=$True)]
+    [parameter (Mandatory=$False)]
     [object] $WebhookData,
 
-    [parameter (Mandatory=$false)]
+    [parameter (Mandatory=$False)]
     [String] $ChannelURL
 )
 
