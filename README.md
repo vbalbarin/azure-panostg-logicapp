@@ -77,7 +77,72 @@ Remove-AzRoleAssignment -ServicePrincipalName $AZURE_AUTOMATION_ACCOUNT_SP_APPID
                         -RoleDefinitionName 'Contributor' `
                         -Scope $('/subscriptions/{0}' -f $AZURE_SUBSCRIPTION_ID)
 
+```
 
+After the automation account has been created, the required `Az` Powershell modules must be added to the automation account.
+
+```powershell
+# Add Necessary Az modules
+# The `Az.Accounts` module must the first module imported into the automation account
+
+Find-Module -Name 'Az.Accounts' | ForEach {
+    New-AzAutomationModule -AutomationAccountName $AZURE_AUTOMATION_ACCOUNT_NAME `
+                           -ResourceGroupName $AZURE_RESOURCE_GROUP `
+                           -ContentLink $('{0}/package/{1}/{2}' -f $_.RepositorySourceLocation, $_.Name, $_.Version) `
+                           -Name $_.Name
+}
+
+# Once this module has been imported, the other required modules are imported
+$AZURE_AUTOMATION_MODULES = @(
+    'Az.Compute',
+    'Az.Network',
+    'Az.Resources',
+    'Az.Storage'
+) | ForEach {Find-Module -Name $_ -Repository PSGallery}
+
+$AZURE_AUTOMATION_MODULES | ForEach {
+    New-AzAutomationModule -AutomationAccountName $AZURE_AUTOMATION_ACCOUNT_NAME `
+                           -ResourceGroupName $AZURE_RESOURCE_GROUP `
+                           -ContentLink $('{0}/package/{1}/{2}' -f $_.RepositorySourceLocation, $_.Name, $_.Version) `
+                           -Name $_.Name
+}
+
+# Import runbook:
+Import-AzAutomationRunbook -Path .\runbook\Get-AzDataSensitivityLevel.ps1 `
+                           -ResourceGroupName $AZURE_RESOURCE_GROUP `
+                           -AutomationAccountName $AZURE_AUTOMATION_ACCOUNT_NAME `
+                           -Type PowerShell
+
+# Publish runbook
+Publish-AzAutomationRunbook -Name 'Get-AzDataSensitivityLevel' `
+                            -ResourceGroupName $AZURE_RESOURCE_GROUP `
+                            -AutomationAccountName $AZURE_AUTOMATION_ACCOUNT_NAME
+
+$AZURE_TEAMS_CHANNEL = '{{ TEAMS_CHANNEL_CONNECTOR_URL}}'
+# Create webhook to trigger the runbook
+$AZURE_AUTOMATION_WEBHOOK = New-AzAutomationWebhook  -Name 'Get-AzDataSensitivityLevel' `
+                           -AutomationAccountName "$AZURE_AUTOMATION_ACCOUNT_NAME" `
+                           -ResourceGroupName "$AZURE_RESOURCE_GROUP" `
+                           -RunbookName 'Get-AzDataSensitivityLevel' `
+                           -Parameters @{WebhookData = $null; ChannelUrl = $AZURE_TEAMS_CHANNEL} `
+                           -IsEnabled $True -ExpiryTime (Get-Date).AddYears(1)
+    
+# Copy and stash the following value, if lost one must run the previous command to generate new webhook.
+$AZURE_AUTOMATION_WEBHOOK.WebhookURI
+
+# Create Eventgrid subscription
+$AZURE_ADVANCED_FILTERS = @(
+    @{operator='StringBeginsWith'; key='Subject'; Values=@(('/subscriptions/{0}/resourcegroups' -f $AZURE_SUBSCRIPTION_ID))},
+    @{operator='StringContains'; key='Subject'; Values=@('providers/Microsoft.Compute/virtualMachines')}
+)
+
+# This will use an EventGrid topic `/subscriptions/{{ subscriptionId }}
+$AZURE_EVENTGRID_SUBSCRIPTION = New-AzEventgridSubscription `
+                                -EventSubscriptionName 'AzVmWrite-EventSubscription' `
+                                -EndpointType webhook `
+                                -Endpoint $AZURE_AUTOMATION_WEBHOOK.WebhookURI `
+                                -IncludedEventType @('Microsoft.Resources.ResourceWriteSuccess') `
+                                -AdvancedFilter $AZURE_ADVANCED_FILTERS
 ```
 ### Creation of logic App
 
@@ -143,3 +208,14 @@ Vincent Balbarin <vincent.balbarin@yale.edu>
 The licenses of these documents are held by [@YaleUniversity](https://github.com/YaleUniversity) under [MIT License](/LICENSE.md).
 
 ## References
+
+https://docs.microsoft.com/en-us/azure/event-grid/ensure-tags-exists-on-new-virtual-machines
+
+TODO: 
+
+* Are we guaranteed time order through Event Grid service:
+* Separate process for pushing out table contents to blobs on a schedule trigger ~ 5
+* Read actual resource value to handle hysteresis.
+* Perhaps polling?
+
+
