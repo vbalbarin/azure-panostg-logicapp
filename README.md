@@ -6,7 +6,7 @@ While Palo Alto Network firewall PANOS 8.+ supports a connection to Azure that e
 
 ## Description of Solution
 
-![PANOsTgSolution](assets/under_construction.svg)
+![PANOsTgSolution](assets/PANOsTgSolution.png)
 
 ## Implementation of Solution
 
@@ -209,7 +209,9 @@ The licenses of these documents are held by [@YaleUniversity](https://github.com
 
 ## References
 
-https://docs.microsoft.com/en-us/azure/event-grid/ensure-tags-exists-on-new-virtual-machines
+[Tutorial: Integrate Azure Automation with Event Grid and Microsoft Teams](https://docs.microsoft.com/en-us/azure/event-grid/ensure-tags-exists-on-new-virtual-machines)
+
+[Starting an Azure Automation runbook with a webhook](https://docs.microsoft.com/en-us/azure/automation/automation-webhooks)
 
 TODO: 
 
