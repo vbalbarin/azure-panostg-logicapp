@@ -230,6 +230,20 @@ function Get-AzResourceFromURI {
 
     [PSCustomObject] $azResource
 }
+
+function DottedOctalIP {
+    param(
+        [parameter(Mandatory=$True)]
+        [String] $DottedDecimalIP
+    )
+
+    $decimalOctets = $DottedDecimalIP.Split('.')
+    $octalOctets = New-Object System.Collections.Generic.List[System.Object]
+    $decimalOctets | ForEach-Object {
+        $octalOctets.Add([Convert]::ToString([Int16] $_, 8).PadLeft(4, '0'))
+    }
+    Write-Output ($octalOctets -join '.')
+}
 #endregion : functions
 
 #region : Main
