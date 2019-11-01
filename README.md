@@ -126,7 +126,7 @@ $AZURE_AUTOMATION_WEBHOOK = New-AzAutomationWebhook  -Name 'Get-AzDataSensitivit
                            -RunbookName 'Get-AzDataSensitivityLevel' `
                            -Parameters @{WebhookData = $null; ChannelUrl = $AZURE_TEAMS_CHANNEL} `
                            -IsEnabled $True -ExpiryTime (Get-Date).AddYears(1)
-    
+
 # Copy and stash the following value, if lost one must run the previous command to generate new webhook.
 $AZURE_AUTOMATION_WEBHOOK.WebhookURI
 
@@ -144,6 +144,70 @@ $AZURE_EVENTGRID_SUBSCRIPTION = New-AzEventgridSubscription `
                                 -IncludedEventType @('Microsoft.Resources.ResourceWriteSuccess') `
                                 -AdvancedFilter $AZURE_ADVANCED_FILTERS
 ```
+
+### Create Storage Account
+
+An Azure Storage Account will be created to contain Azure blob storage and Azure table storage for use by the runbook.
+
+```powershell
+# Create a storage account to park artifacts used by the Automation account
+# Add deployment parameters to existing hashtable specific to Storage
+
+$AZURE_DEPLOYMENT_PARAMETERS = @{
+    ResourceLocation         = '{{ ResourceLocation }}'
+    OwnerSignInName          = '{{ OwnerSignInName }}'
+    ChargingAccount          = '{{ ChargingAccount }}'
+    ApplicationName          = '{{ ApplicationName }}'
+    ApplicationBusinessUnit  = '{{ ApplicationBusinessUnit }}'
+    Environment              = '{{ Environment }}'
+    DataSensitivity          = '{{ DataSensitivity }}'
+}
+
+$AZURE_STORAGE_ACCOUNT_DEPLOYMENT_PARAMETERS =  $AZURE_DEPLOYMENT_PARAMETERS + @{
+    SkuName           = 'Standard_LRS'
+    AccountKind       = 'StorageV2'
+    AccessTierDefault = 'Hot'
+    CustomDomain      = ''
+}
+
+$AZURE_DEPLOYMENT = "storageaccount-$(Get-Date -Format 'yyMMddHHmmm')-deployment"
+
+$deploymentStorageAccount = New-AzResourceGroupDeployment -Name $AZURE_DEPLOYMENT `
+                                                          -ResourceGroupName $AZURE_RESOURCE_GROUP `
+                                                          -TemplateFile ./templates/storageaccount/azuredeploy.json `
+                                                          -TemplateParameterObject $AZURE_STORAGE_ACCOUNT_DEPLOYMENT_PARAMETERS
+
+$AZURE_STORAGE_ACCOUNT = $deploymentStorageAccount.Outputs.storageAccountName.Value
+$AZURE_STORAGE_KEY = $(Get-AzStorageAccountKey -Name "$AZURE_STORAGE_ACCOUNT" -ResourceGroupName "$AZURE_RESOURCE_GROUP" | ? {$_.KeyName -eq 'key1'}).Value
+
+
+$AZURE_STORAGE_CONTEXT = New-AzStorageContext -StorageAccountName "$AZURE_STORAGE_ACCOUNT" `
+                        -StorageAccountKey "$AZURE_STORAGE_KEY"
+
+# Create container to hold Azure blobs
+New-AzStorageContainer -Context $AZURE_STORAGE_CONTEXT `
+                       -Permission Off `
+                       -Name 'config-fts-pan'
+
+$StartTime = Get-Date
+$ExpiryTime = $StartTime.AddYears(1)
+
+$AZURE_STORAGE_SAS_TOKEN = New-AzStorageContainerSASToken -Context $AZURE_STORAGE_CONTEXT `
+                                                          -Name 'config-fts-pan' `
+                                                          -Permission rl `
+                                                          -StartTime $StartTime `
+                                                          -ExpiryTime $ExpiryTime
+
+$AZURE_FTS_PAN_CONFIGS=$(Get-ChildItem -Recurse "$HOME/Downloads/config-fts-pan/address-groups")
+
+$AZURE_FTS_PAN_CONFIGS | % { Set-AzStorageBlobContent -File $_ `
+                                                      -Context $AZURE_STORAGE_CONTEXT `
+                                                      -Container 'config-fts-pan' `
+                                                      -Blob $($_.Directory.Name + '/' + $_.Name) `
+                                                      -Properties @{"ContentType" = "text/plain;charset=ansi"} }
+
+```
+
 ### Creation of logic App
 
 A service principal must be created for use by the Azure runbook and by the Logic App API connection object.
@@ -213,7 +277,7 @@ The licenses of these documents are held by [@YaleUniversity](https://github.com
 
 [Starting an Azure Automation runbook with a webhook](https://docs.microsoft.com/en-us/azure/automation/automation-webhooks)
 
-TODO: 
+TODO:
 
 * Are we guaranteed time order through Event Grid service:
 * Separate process for pushing out table contents to blobs on a schedule trigger ~ 5
