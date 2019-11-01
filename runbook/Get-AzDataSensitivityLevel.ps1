@@ -28,22 +28,22 @@
     A RunAs account in the Automation account is required for this runbook.
 
 .PARAMETER WebhookData
-    Mandatory. The information about the write event that is sent to this runbook from Azure Event grid.
+    Optional. The information about the write event that is sent to this runbook from Azure Event grid.
   
 .PARAMETER ChannelURL
-    Optinal. The Microsoft Teams Channel webhook URL that information will get sent.
+    Optional. The Microsoft Teams Channel webhook URL that information will get sent.
 
 .NOTES
     AUTHOR: Vincent Balbarin
     COPYRIGHT: Yale University 2019
-    LASTEDIT: 2019-07-18
+    LASTEDIT: 2019-07-25
 #>
  
 param(
-    [parameter (Mandatory=$True)]
+    [parameter (Mandatory=$False)]
     [object] $WebhookData,
 
-    [parameter (Mandatory=$false)]
+    [parameter (Mandatory=$False)]
     [String] $ChannelURL
 )
 
@@ -229,6 +229,20 @@ function Get-AzResourceFromURI {
     }
 
     [PSCustomObject] $azResource
+}
+
+function DottedOctalIP {
+    param(
+        [parameter(Mandatory=$True)]
+        [String] $DottedDecimalIP
+    )
+
+    $decimalOctets = $DottedDecimalIP.Split('.')
+    $octalOctets = New-Object System.Collections.Generic.List[System.Object]
+    $decimalOctets | ForEach-Object {
+        $octalOctets.Add([Convert]::ToString([Int16] $_, 8).PadLeft(4, '0'))
+    }
+    Write-Output ($octalOctets -join '.')
 }
 #endregion : functions
 

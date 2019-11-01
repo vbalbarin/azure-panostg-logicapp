@@ -6,7 +6,7 @@ While Palo Alto Network firewall PANOS 8.+ supports a connection to Azure that e
 
 ## Description of Solution
 
-![PANOsTgSolution](assets/under_construction.svg)
+![PANOsTgSolution](assets/PANOsTgSolution.png)
 
 ## Implementation of Solution
 
@@ -77,8 +77,137 @@ Remove-AzRoleAssignment -ServicePrincipalName $AZURE_AUTOMATION_ACCOUNT_SP_APPID
                         -RoleDefinitionName 'Contributor' `
                         -Scope $('/subscriptions/{0}' -f $AZURE_SUBSCRIPTION_ID)
 
+```
+
+After the automation account has been created, the required `Az` Powershell modules must be added to the automation account.
+
+```powershell
+# Add Necessary Az modules
+# The `Az.Accounts` module must the first module imported into the automation account
+
+Find-Module -Name 'Az.Accounts' | ForEach {
+    New-AzAutomationModule -AutomationAccountName $AZURE_AUTOMATION_ACCOUNT_NAME `
+                           -ResourceGroupName $AZURE_RESOURCE_GROUP `
+                           -ContentLink $('{0}/package/{1}/{2}' -f $_.RepositorySourceLocation, $_.Name, $_.Version) `
+                           -Name $_.Name
+}
+
+# Once this module has been imported, the other required modules are imported
+$AZURE_AUTOMATION_MODULES = @(
+    'Az.Compute',
+    'Az.Network',
+    'Az.Resources',
+    'Az.Storage'
+) | ForEach {Find-Module -Name $_ -Repository PSGallery}
+
+$AZURE_AUTOMATION_MODULES | ForEach {
+    New-AzAutomationModule -AutomationAccountName $AZURE_AUTOMATION_ACCOUNT_NAME `
+                           -ResourceGroupName $AZURE_RESOURCE_GROUP `
+                           -ContentLink $('{0}/package/{1}/{2}' -f $_.RepositorySourceLocation, $_.Name, $_.Version) `
+                           -Name $_.Name
+}
+
+# Import runbook:
+Import-AzAutomationRunbook -Path .\runbook\Get-AzDataSensitivityLevel.ps1 `
+                           -ResourceGroupName $AZURE_RESOURCE_GROUP `
+                           -AutomationAccountName $AZURE_AUTOMATION_ACCOUNT_NAME `
+                           -Type PowerShell
+
+# Publish runbook
+Publish-AzAutomationRunbook -Name 'Get-AzDataSensitivityLevel' `
+                            -ResourceGroupName $AZURE_RESOURCE_GROUP `
+                            -AutomationAccountName $AZURE_AUTOMATION_ACCOUNT_NAME
+
+$AZURE_TEAMS_CHANNEL = '{{ TEAMS_CHANNEL_CONNECTOR_URL}}'
+# Create webhook to trigger the runbook
+$AZURE_AUTOMATION_WEBHOOK = New-AzAutomationWebhook  -Name 'Get-AzDataSensitivityLevel' `
+                           -AutomationAccountName "$AZURE_AUTOMATION_ACCOUNT_NAME" `
+                           -ResourceGroupName "$AZURE_RESOURCE_GROUP" `
+                           -RunbookName 'Get-AzDataSensitivityLevel' `
+                           -Parameters @{WebhookData = $null; ChannelUrl = $AZURE_TEAMS_CHANNEL} `
+                           -IsEnabled $True -ExpiryTime (Get-Date).AddYears(1)
+
+# Copy and stash the following value, if lost one must run the previous command to generate new webhook.
+$AZURE_AUTOMATION_WEBHOOK.WebhookURI
+
+# Create Eventgrid subscription
+$AZURE_ADVANCED_FILTERS = @(
+    @{operator='StringBeginsWith'; key='Subject'; Values=@(('/subscriptions/{0}/resourcegroups' -f $AZURE_SUBSCRIPTION_ID))},
+    @{operator='StringContains'; key='Subject'; Values=@('providers/Microsoft.Compute/virtualMachines')}
+)
+
+# This will use an EventGrid topic `/subscriptions/{{ subscriptionId }}
+$AZURE_EVENTGRID_SUBSCRIPTION = New-AzEventgridSubscription `
+                                -EventSubscriptionName 'AzVmWrite-EventSubscription' `
+                                -EndpointType webhook `
+                                -Endpoint $AZURE_AUTOMATION_WEBHOOK.WebhookURI `
+                                -IncludedEventType @('Microsoft.Resources.ResourceWriteSuccess') `
+                                -AdvancedFilter $AZURE_ADVANCED_FILTERS
+```
+
+### Create Storage Account
+
+An Azure Storage Account will be created to contain Azure blob storage and Azure table storage for use by the runbook.
+
+```powershell
+# Create a storage account to park artifacts used by the Automation account
+# Add deployment parameters to existing hashtable specific to Storage
+
+$AZURE_DEPLOYMENT_PARAMETERS = @{
+    ResourceLocation         = '{{ ResourceLocation }}'
+    OwnerSignInName          = '{{ OwnerSignInName }}'
+    ChargingAccount          = '{{ ChargingAccount }}'
+    ApplicationName          = '{{ ApplicationName }}'
+    ApplicationBusinessUnit  = '{{ ApplicationBusinessUnit }}'
+    Environment              = '{{ Environment }}'
+    DataSensitivity          = '{{ DataSensitivity }}'
+}
+
+$AZURE_STORAGE_ACCOUNT_DEPLOYMENT_PARAMETERS =  $AZURE_DEPLOYMENT_PARAMETERS + @{
+    SkuName           = 'Standard_LRS'
+    AccountKind       = 'StorageV2'
+    AccessTierDefault = 'Hot'
+    CustomDomain      = ''
+}
+
+$AZURE_DEPLOYMENT = "storageaccount-$(Get-Date -Format 'yyMMddHHmmm')-deployment"
+
+$deploymentStorageAccount = New-AzResourceGroupDeployment -Name $AZURE_DEPLOYMENT `
+                                                          -ResourceGroupName $AZURE_RESOURCE_GROUP `
+                                                          -TemplateFile ./templates/storageaccount/azuredeploy.json `
+                                                          -TemplateParameterObject $AZURE_STORAGE_ACCOUNT_DEPLOYMENT_PARAMETERS
+
+$AZURE_STORAGE_ACCOUNT = $deploymentStorageAccount.Outputs.storageAccountName.Value
+$AZURE_STORAGE_KEY = $(Get-AzStorageAccountKey -Name "$AZURE_STORAGE_ACCOUNT" -ResourceGroupName "$AZURE_RESOURCE_GROUP" | ? {$_.KeyName -eq 'key1'}).Value
+
+
+$AZURE_STORAGE_CONTEXT = New-AzStorageContext -StorageAccountName "$AZURE_STORAGE_ACCOUNT" `
+                        -StorageAccountKey "$AZURE_STORAGE_KEY"
+
+# Create container to hold Azure blobs
+New-AzStorageContainer -Context $AZURE_STORAGE_CONTEXT `
+                       -Permission Off `
+                       -Name 'config-fts-pan'
+
+$StartTime = Get-Date
+$ExpiryTime = $StartTime.AddYears(1)
+
+$AZURE_STORAGE_SAS_TOKEN = New-AzStorageContainerSASToken -Context $AZURE_STORAGE_CONTEXT `
+                                                          -Name 'config-fts-pan' `
+                                                          -Permission rl `
+                                                          -StartTime $StartTime `
+                                                          -ExpiryTime $ExpiryTime
+
+$AZURE_FTS_PAN_CONFIGS=$(Get-ChildItem -Recurse "$HOME/Downloads/config-fts-pan/address-groups")
+
+$AZURE_FTS_PAN_CONFIGS | % { Set-AzStorageBlobContent -File $_ `
+                                                      -Context $AZURE_STORAGE_CONTEXT `
+                                                      -Container 'config-fts-pan' `
+                                                      -Blob $($_.Directory.Name + '/' + $_.Name) `
+                                                      -Properties @{"ContentType" = "text/plain;charset=ansi"} }
 
 ```
+
 ### Creation of logic App
 
 A service principal must be created for use by the Azure runbook and by the Logic App API connection object.
@@ -143,3 +272,16 @@ Vincent Balbarin <vincent.balbarin@yale.edu>
 The licenses of these documents are held by [@YaleUniversity](https://github.com/YaleUniversity) under [MIT License](/LICENSE.md).
 
 ## References
+
+[Tutorial: Integrate Azure Automation with Event Grid and Microsoft Teams](https://docs.microsoft.com/en-us/azure/event-grid/ensure-tags-exists-on-new-virtual-machines)
+
+[Starting an Azure Automation runbook with a webhook](https://docs.microsoft.com/en-us/azure/automation/automation-webhooks)
+
+TODO:
+
+* Are we guaranteed time order through Event Grid service:
+* Separate process for pushing out table contents to blobs on a schedule trigger ~ 5
+* Read actual resource value to handle hysteresis.
+* Perhaps polling?
+
+
